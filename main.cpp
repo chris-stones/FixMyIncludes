@@ -42,7 +42,7 @@ void FixMyIncludes(const boost::filesystem::path & path) {
 	if( ( strcasecmp(p.extension().c_str(), ".c"  )==0) ||
 	    ( strcasecmp(p.extension().c_str(), ".h"  )==0) ||
 	    ( strcasecmp(p.extension().c_str(), ".cpp")==0) ||
-	    ( strcasecmp(p.extension().c_str(), ".cpp")==0) ){
+	    ( strcasecmp(p.extension().c_str(), ".hpp")==0) ){
 	 
 	  SourceFile sf( path, p.c_str() );
 	
