@@ -41,19 +41,24 @@ static inline int ToKey(int c)  {
 }
 
 class Includes
-{
-  typedef std::map<std::string, std::string> IncludeMap;
-  typedef std::pair<std::string, std::string> IncludePair;
- 
+{ 
   const boost::filesystem::path root;
-  IncludeMap includeMap;
-  
+ 
   Includes(){}
   
 public:
   
+  typedef std::map<std::string, std::string> IncludeMap;
+  typedef std::pair<std::string, std::string> IncludePair;
+  
   typedef IncludeMap::iterator iterator;
   typedef IncludeMap::const_iterator const_iterator;
+  typedef IncludePair pair_type;
+  
+private:
+  IncludeMap includeMap;
+  
+public:
   
   iterator begin() {
     return includeMap.begin(); 

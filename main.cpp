@@ -30,6 +30,11 @@ void FixMyIncludes(const boost::filesystem::path & path) {
   if(path.has_extension() && (strcasecmp(path.extension().c_str(), ".svn")==0))
     return;
   
+  const Includes relativeIncludes(path);
+  
+  if(args.ask || args.verbose)
+    printf("Entering %s\n", path.c_str());
+  
   boost::filesystem::directory_iterator end;
   for( boost::filesystem::directory_iterator itor = boost::filesystem::directory_iterator( path ); itor != end; itor++)
   {
@@ -44,7 +49,7 @@ void FixMyIncludes(const boost::filesystem::path & path) {
 	    ( strcasecmp(p.extension().c_str(), ".cpp")==0) ||
 	    ( strcasecmp(p.extension().c_str(), ".hpp")==0) ){
 	 
-	  SourceFile sf( path, p.c_str() );
+	  SourceFile sf( path, p.c_str(), relativeIncludes );
 	
 	  if(!args.pretend)
 	    sf.Write();

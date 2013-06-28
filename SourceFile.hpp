@@ -68,6 +68,16 @@ public:
   bool IsSearchPathInclude() const { return tokenType == PATH_INCLUDE; }
   bool IsAnInclude() const { return tokenType != RAW; }
   
+  std::string IncludeString() const {
+   
+    if(IsRelativeInclude()) 
+      return std::string("#include \"") + tokenText + "\"";
+    else if(IsSearchPathInclude()) 
+      return std::string("#include <") + tokenText + ">";
+    else
+      return "";
+  }
+  
   const std::string &GetText() const {
    
     return tokenText;
@@ -121,17 +131,23 @@ class SourceFile
   typedef std::vector<Token> Tokens;
   
   Tokens tokens;
+  
+  const Includes &relativeIncludes;
 
 public:
   
   class ParseSourceFileException : public std::exception {public: const char * what() const throw() { return "ParseSourceFileException"; } };
   
-  SourceFile(const boost::filesystem::path &root, const std::string &file)
-    :	root(root), file(file)
+  SourceFile(const boost::filesystem::path &root, const std::string &file, const Includes &relativeIncludes)
+    :	root(root), file(file), relativeIncludes(relativeIncludes)
   {
-    printf("Parsing source file %s\n", file.c_str() );
+    if(args.verbose)
+      printf("Parsing source file %s\n", file.c_str() );
     ParseSourceFile();
-    FixIncludes();
+    
+    boost::filesystem::path filepath( file.c_str() );
+    
+    FixIncludes(filepath.filename().c_str());
   }
   
   void Write() {
@@ -153,7 +169,37 @@ public:
   
 private:
   
-  void FixIncludes( const Includes & primary_includes, const Includes & secondary_includes, Token & token ) {
+  void FixIncludes( const char * filename, bool swapType, Includes::const_iterator include_itor, Token &token ) {
+    
+    // HACK: kluding back in lost <> / "" info in include lookup table.
+    Token dummyToToken( token );
+    dummyToToken.SetText( include_itor->second );
+    if(swapType)
+      dummyToToken.SwapIncludeType();
+    ///////////////////////////////////////////////////////////////////
+    
+    char fix = '\0';
+    
+    if(args.ask)
+      while(fix != 'y' && fix != 'Y' && fix != 'n' && fix != 'N' ) {
+	printf("%s: replace %s with %s ? (y/n): ", filename, token.IncludeString().c_str(), dummyToToken.IncludeString().c_str() );
+	fix = getchar();
+	int ch;
+	while ((ch = getchar()) != '\n' && ch != EOF);
+      }
+    else fix = 'y';
+      
+    if(fix == 'y' || fix == 'Y') {
+      if(!args.ask && args.verbose)
+	printf("%s: replaced %s with %s\n", filename, token.IncludeString().c_str(), dummyToToken.IncludeString().c_str() );
+      
+      token.SetText( include_itor->second );
+      if(swapType)
+	token.SwapIncludeType();
+    }
+  }
+  
+  void FixIncludes( const char * filename, const Includes & primary_includes, const Includes & secondary_includes, Token & token ) {
           
     Includes::const_iterator include_itor;
       
@@ -161,83 +207,59 @@ private:
       
       if( token.GetText() == include_itor->second ) {
 	
-	// This include looks valid!
-	
-	if(args.verbose)
-	  printf("%s: looks good!\n", token.GetText().c_str() );
+	// its good!
       }
       else {
-	
-	// This include looks invalid... But I know how to fix it!
-	
-	if(args.verbose)
-	  printf("%s: is to be replaced with %s\n", token.GetText().c_str(), include_itor->second.c_str());
-	
-	if(args.ask)
-	  getchar();
-	
-	token.SetText(include_itor->second);
+
+	// wrong, but fixable
+	FixIncludes( filename, false, include_itor, token );	
       }
     }
     else if( (include_itor = secondary_includes.find( token.GetText() ) ) != secondary_includes.end() ) {
       
-      // We found a match, but in the wrong includes group ( <> vs "" )
-      
-      token.SwapIncludeType();
-      
-      if( token.GetText() == include_itor->second ) {
-	
-	// good to go!
-	
-	if(args.verbose)
-	  printf("%s: looks good after swapping include type!\n", token.GetText().c_str() );
-	
-	if(args.ask)
-	  getchar();
-      }
-      else {
-	
-	// Not only was the type wrong.. but we also have some case and slash issues.
-
-	if(args.verbose)
-	  printf("%s: is to be replaced with %s after swapping include type\n", token.GetText().c_str(), include_itor->second.c_str());
-	
-	if(args.ask)
-	  getchar();
-	
-	token.SetText(include_itor->second);
-      }
+      // wrong, but fixable with different include type <> vs ""
+      FixIncludes( filename, true, include_itor, token );	
       
     }
     else {
       
       /* Couldnt find a matching entry in any of the given includes.
-       * Just fix the back-slashes! */
-     
-      if(args.verbose)
-	printf("%s: I dont know what to do with this.\n", token.GetText().c_str() );
+       * Just fix the back-slashes is we can? */
+      
+      if(!args.quiet)
+	printf("WARNING: I cant find a match for %s\n"
+		"\tDo you need to add another search path \'I\' ?\n", token.IncludeString().c_str());
       
       std::string fixedSlashes = token.GetText();
       std::transform(fixedSlashes.begin(), fixedSlashes.end(), fixedSlashes.begin(), FixSlashes );
 
-      if(args.ask)
-	  getchar();
+      if( fixedSlashes != token.GetText() ) {
+	
+	// HACK: kludge up a fake include map to update the slashes.
+	Includes::IncludeMap dummyMap;
+	dummyMap[token.GetText()] = fixedSlashes;
+	FixIncludes( filename, false, dummyMap.find(token.GetText()), token );
+	
+      }
+      else {
+	// Nothing I can do with this!
+      }
       
-      token.SetText(fixedSlashes);
+      // Prompt the user to add more '-I /paths/' args ?
     } 
   }
   
-  void FixIncludes( ) {
+  void FixIncludes(const char * filename) {
    
     Includes & searchPathIncludes = Includes::SearchPathIncludes();
-    Includes   relativeIncludes(root);
+//  Includes   relativeIncludes(root);
     
     for(Tokens::iterator token_itor = tokens.begin(); token_itor != tokens.end(); token_itor++) {
      
       if(token_itor->IsRelativeInclude())
-	FixIncludes(relativeIncludes, searchPathIncludes, *token_itor);
+	FixIncludes(filename, relativeIncludes, searchPathIncludes, *token_itor);
       else if(token_itor->IsSearchPathInclude())
-	FixIncludes(searchPathIncludes, relativeIncludes, *token_itor);
+	FixIncludes(filename, searchPathIncludes, relativeIncludes, *token_itor);
     }
   }
   
